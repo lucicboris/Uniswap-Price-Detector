@@ -1,0 +1,215 @@
+function exitHandler(signal, code) {
+    console.log(code, signal)
+
+    process.exit()
+}
+
+// Catches ctrl+c event
+process.on('SIGINT', exitHandler)
+
+// Catches "kill pid"
+process.on('SIGUSR1', exitHandler)
+process.on('SIGUSR2', exitHandler)
+
+// Catches uncaught exceptions
+process.on('uncaughtException', exitHandler)
+
+const config = require('./config.json')
+
+const mathjs = require('mathjs')
+const math = mathjs.create(mathjs.all)
+math.config({ number: 'BigNumber' })
+
+const ethers = require('ethers')
+const Web3 = require('web3')
+const web3Url = process.env.ETH_NODE_URL || config.DEFAULT_NODE_URL
+//const web3Url = `wss://mainnet.infura.io/ws/v3/8a4639a05fd546ecb05792711fade00b`
+const web3 = new Web3(new Web3.providers.WebsocketProvider(web3Url,
+    {
+        clientConfig: {
+            maxReceivedFrameSize: 10000000000,
+            maxReceivedMessageSize: 10000000000,
+        }
+    }))
+
+const IUniswapV3FactoryAbi = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json').abi
+const IUniswapV3QuoterAbi = require('@uniswap/v3-periphery/artifacts/contracts/interfaces/IQuoter.sol/IQuoter.json').abi
+const UniswapV3PoolAbi = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Pool.sol/UniswapV3Pool.json').abi
+const IERC20MetadataAbi = require('@uniswap/v3-periphery/artifacts/contracts/interfaces/IERC20Metadata.sol/IERC20Metadata.json').abi
+
+const factory = new web3.eth.Contract(IUniswapV3FactoryAbi, config.UNISWAPV3_FACTORY_ADDRESS)
+const quoter = new web3.eth.Contract(IUniswapV3QuoterAbi, config.UNISWAPV3_QUOTER_ADDRESS)
+
+function isWeth(address) {
+    return config.WETH_ADDRESS_MAINNET === address
+}
+
+async function getTokenInfo(address) {
+    const token = new web3.eth.Contract(IERC20MetadataAbi, address)
+
+    const symbol = await token.methods.symbol().call().catch(() => { return '' })
+    const name = await token.methods.name().call().catch(() => { return '' })
+    const decimals = await token.methods.decimals().call().catch(() => { return '' })
+
+    return {
+        symbol,
+        name,
+        decimals
+    }
+}
+
+const state = {
+    tokens: {},
+    pools: {},
+    prices: {}
+}
+
+async function updatePoolPrices(pool) {
+    let otherToken = isWeth(pool.token0) ? pool.token1 : pool.token0
+
+    if (!state.prices[otherToken]) {
+        state.prices[otherToken] = {
+            address: otherToken,
+            ...state.tokens[otherToken],
+            pools: {}
+        }
+    }
+
+    const ethToTokenPrice = await quoter.methods.quoteExactInputSingle(
+        config.WETH_ADDRESS_MAINNET,
+        otherToken,
+        pool.fee,
+        ethers.utils.parseUnits('1', state.tokens[config.WETH_ADDRESS_MAINNET].decimals).toString(),
+        0
+    ).call().catch((err) => { return 0 })
+
+    if (math.bignumber(ethToTokenPrice).isZero()) {
+        delete state.prices[otherToken].pools[pool.pool]
+
+        return
+    }
+
+    const tokenToEthPrice = await quoter.methods.quoteExactOutputSingle(
+        otherToken,
+        config.WETH_ADDRESS_MAINNET,
+        pool.fee,
+        ethers.utils.parseUnits('1', state.tokens[config.WETH_ADDRESS_MAINNET].decimals).toString(),
+        0
+    ).call().catch((err) => { return 0 })
+
+    if (math.bignumber(tokenToEthPrice).isZero()) {
+        delete state.prices[otherToken].pools[pool.pool]
+
+        return
+    }
+
+    state.prices[otherToken].pools[pool.pool] = {
+        ...pool,
+        ethToTokenPrice: ethers.utils.formatUnits(ethToTokenPrice, state.tokens[otherToken].decimals).toString(),
+        tokenToEthPrice: ethers.utils.formatUnits(tokenToEthPrice, state.tokens[otherToken].decimals).toString()
+    }
+}
+
+async function main() {
+    web3.eth.subscribe('newBlockHeaders')
+        .on('connected', function (id) {
+            console.info('blocks subscription connected', id)
+        })
+        .on('data', function (block) {
+            console.info(`NEW_BLOCK ${block.number}`)
+        })
+        .on('error', function (err) {
+            console.error('block subscription error', err)
+
+            process.exit(1)
+        })
+
+    factory.events.PoolCreated({
+        fromBlock: "earliest"
+    })
+        .on("connected", function (subscriptionId) {
+            console.log('pools subscription connected', subscriptionId);
+        })
+        .on('data', async function (event) {
+            const isToken0Weth = isWeth(event.returnValues.token0)
+            const isToken1Weth = isWeth(event.returnValues.token1)
+console.log(event)
+            if (!isToken0Weth && !isToken1Weth) {
+                return
+            }
+
+            if (!state.tokens[event.returnValues.token0]) {
+                const tokenInfo = await getTokenInfo(event.returnValues.token0)
+
+                if (!tokenInfo.name || !tokenInfo.symbol || !tokenInfo.decimals) {
+                    return
+                }
+
+                state.tokens[event.returnValues.token0] = tokenInfo
+            }
+            if (!state.tokens[event.returnValues.token1]) {
+                const tokenInfo = await getTokenInfo(event.returnValues.token1)
+
+                if (!tokenInfo.name || !tokenInfo.symbol || !tokenInfo.decimals) {
+                    return
+                }
+
+                state.tokens[event.returnValues.token1] = tokenInfo
+            }
+
+            state.pools[event.returnValues.pool] = event.returnValues
+
+            updatePoolPrices(state.pools[event.returnValues.pool])
+
+            const pool = new web3.eth.Contract(UniswapV3PoolAbi, event.returnValues.pool)
+
+            pool.events.allEvents()
+                .on('data', function (event) {
+                    updatePoolPrices(state.pools[event.address])
+                })
+                .on('error', function (error, receipt) {
+                    console.log('price update subscription error', error, receipt)
+
+                    process.exit(1)
+                })
+        })
+        .on('changed', function (event) {
+            console.log('changed', event)
+        })
+        .on('error', function (error, receipt) {
+            console.log('pool created subscription error', error, receipt)
+
+            process.exit(1)
+        })
+}
+
+main()
+
+const express = require('express')
+const app = express();
+
+app.use(function (req, res, next) {
+    console.log(new Date(), req.connection.remoteAddress, req.method, req.url)
+    // Website you wish to allow to connect
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    // Request methods you wish to allow
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+
+    // Request headers you wish to allow
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
+
+    // Set to true if you need the website to include cookies in the requests sent
+    // to the API (e.g. in case you use sessions)
+    res.setHeader('Access-Control-Allow-Credentials', true);
+
+    // Pass to next layer of middleware
+    next();
+});
+
+app.get('/uniswap3', function (req, res) {
+    res.send(Object.keys(state.prices).map((key) => { return state.prices[key] }))
+});
+
+const port = process.env.NODE_PORT || config.DEFAULT_API_PORT
+app.listen(port, () => console.log(`Listening on port ${port}`))

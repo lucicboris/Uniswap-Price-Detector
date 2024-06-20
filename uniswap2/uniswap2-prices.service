@@ -1,0 +1,16 @@
+[Unit]
+Description=UniswapV2 tokens price API
+After=network.target
+
+[Service]
+Environment=NODE_PORT=5000
+Environment=ETH_NODE_URL=ws://127.0.0.1:8545
+Type=simple
+User=apps
+WorkingDirectory=/opt/uniswap2
+ExecStart=/usr/local/.nvm/versions/node/v18.15.0/bin/node index.js
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+

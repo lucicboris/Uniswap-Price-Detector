@@ -1,0 +1,27 @@
+{
+  "name": "uniswap-prices",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@uniswap/default-token-list": "^1.5.0",
+    "@uniswap/sdk": "^3.0.3",
+    "@uniswap/sdk-core": "^5.3.0",
+    "@uniswap/v2-core": "^1.0.1",
+    "@uniswap/v2-sdk": "^4.4.0",
+    "@uniswap/v3-sdk": "^3.13.1",
+    "abi-decoder": "^2.3.0",
+    "axios": "^0.24.0",
+    "better-sqlite3": "^7.1.1",
+    "ethers": "^5.0.19",
+    "express": "^4.17.1",
+    "graphql-request": "^7.0.1",
+    "mathjs": "^8.0.1",
+    "web3": "^1.3.0"
+  }
+}

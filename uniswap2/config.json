@@ -1,0 +1,24 @@
+{
+  "DEFAULT_NODE_URL": "ws://127.0.0.1:8545",
+  "MONITOR_NODE_URL": "wss://mainnet.infura.io/ws/v3/8058a5a63ab0445d80ed6458861b1917",
+  "RPC_MAINNET": "https://mainnet.infura.io/v3/8058a5a63ab0445d80ed6458861b1917",
+  "WETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "WETHData": {
+    "name": "Wrapped Ether",
+    "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "symbol": "WETH",
+    "decimals": 18,
+    "chainId": 1
+  },
+  "CUSTOM_AMOUNT": "700000000000000000",
+  "ETH_AMOUNT": 1,
+  "MONITOR_APPS": [
+    "http://localhost:5000/",
+    "http://65.21.142.83:5000/"
+  ],
+  "MONITOR_APPS_DATA": "uniswap2",
+  "MONITOR_APPS_BLOCK": "block",
+  "MONITOR_APPS_KILL": "kill",
+  "MONITOR_APPS_KILL_INTERVAL": 10000,
+  "MONITOR_RESET_INTERVAL": 120000
+}
